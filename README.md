@@ -1,2 +1,2 @@
-# Connections
-Making a website to unite college students, partly for friendship and partly for more :)
+# Crush
+Making a website/ios/andriod app for college students to find their crush without the embarrasement of rejection.
