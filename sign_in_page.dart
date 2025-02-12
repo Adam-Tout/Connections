@@ -41,10 +41,10 @@ class _SignInPageState extends State<SignInPage> {
       if (user != null) {
         await user.reload();
       }
-  /*
-      // Enforce email verification
+
+      /*
+      // If you want to enforce email verification, uncomment:
       if (user != null && !user.emailVerified) {
-        // Immediately sign them out
         await FirebaseAuth.instance.signOut();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -53,8 +53,8 @@ class _SignInPageState extends State<SignInPage> {
         );
         return;
       }
-*/
-      // Otherwise, the user is signed in with a verified email
+      */
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sign-in successful!')),
       );
@@ -76,9 +76,7 @@ class _SignInPageState extends State<SignInPage> {
 
   // Sign in with Google
   Future<void> _signInWithGoogle() async {
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
@@ -90,21 +88,19 @@ class _SignInPageState extends State<SignInPage> {
         return;
       }
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+      final googleAuth = await googleUser.authentication;
 
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      final UserCredential userCredential =
+      final userCredential =
           await FirebaseAuth.instance.signInWithCredential(credential);
 
       final String? email = userCredential.user?.email;
       if (email != null) {
         final domain = email.split('@').last;
-        // If you want to ensure the domain is a valid college domain:
         if (!['university.edu', 'college.edu', 'scu.edu'].contains(domain)) {
           await FirebaseAuth.instance.signOut();
           ScaffoldMessenger.of(context).showSnackBar(
@@ -129,9 +125,7 @@ class _SignInPageState extends State<SignInPage> {
         SnackBar(content: Text('Google Sign-in failed: ${e.message}')),
       );
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
@@ -159,9 +153,7 @@ class _SignInPageState extends State<SignInPage> {
   Widget build(BuildContext context) {
     // Bold, modern UI with gradient background
     return Scaffold(
-      // We add a gradient background here
       body: GestureDetector(
-        // This GestureDetector allows you to tap away to dismiss the keyboard
         onTap: () {
           FocusScope.of(context).unfocus();
         },
@@ -178,7 +170,7 @@ class _SignInPageState extends State<SignInPage> {
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
               child: Column(
                 children: [
-                  // App logo or placeholder
+                  // Logo
                   Container(
                     width: 100,
                     height: 100,
@@ -194,7 +186,6 @@ class _SignInPageState extends State<SignInPage> {
                   ),
                   const SizedBox(height: 16),
 
-                  // App Name
                   const Text(
                     'Crush Finder',
                     style: TextStyle(
@@ -205,7 +196,6 @@ class _SignInPageState extends State<SignInPage> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Sign In text
                   const Text(
                     'Sign in to discover your campus crush!',
                     style: TextStyle(
@@ -216,7 +206,6 @@ class _SignInPageState extends State<SignInPage> {
                   ),
                   const SizedBox(height: 32),
 
-                  // Card with form
                   Card(
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
@@ -278,7 +267,7 @@ class _SignInPageState extends State<SignInPage> {
                             ),
                             const SizedBox(height: 16),
 
-                            // Google Sign-In button
+                            // Google Sign-In
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
@@ -304,12 +293,12 @@ class _SignInPageState extends State<SignInPage> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Sign Up link (optional)
+                  // Sign Up link
                   TextButton(
                     onPressed: () {
-                      // Navigate to your Sign Up page
-                      Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const SignUpPage())
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SignUpPage()),
                       );
                     },
                     child: const Text(
