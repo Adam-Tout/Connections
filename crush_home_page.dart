@@ -28,14 +28,13 @@ class _CrushHomePageState extends State<CrushHomePage> {
     _initPage();
   }
 
-  /// We first load the user's college slug, then fetch the user list,
-  /// then check for new matches (which show the mutual crush message).
+  /// 1) Determine user’s college slug, fetch users, then check for notifications
   Future<void> _initPage() async {
     setState(() => _isLoading = true);
     try {
       _collegeSlug = await _getCollegeSlug();
       await _fetchUsersInCollege();
-      await _checkForNewMatches(); // see if there's a "mutual crush" doc waiting
+      await _checkForNotifications(); // see if we have unread mutual crush notifications
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error initializing page: $e')),
@@ -45,7 +44,7 @@ class _CrushHomePageState extends State<CrushHomePage> {
     }
   }
 
-  /// Return the college slug from current user's email
+  /// 2) Return the college slug from user’s email
   Future<String> _getCollegeSlug() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
@@ -59,7 +58,7 @@ class _CrushHomePageState extends State<CrushHomePage> {
     return domainMap[domain] ?? 'unknown_college';
   }
 
-  /// Fetch all users from the same college, except myself
+  /// 3) Fetch all users from the same college (except me)
   Future<void> _fetchUsersInCollege() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
@@ -76,12 +75,8 @@ class _CrushHomePageState extends State<CrushHomePage> {
 
     final allUsers = <Map<String, dynamic>>[];
     for (final doc in querySnap.docs) {
-      // ALWAYS skip if doc's id matches my uid
-      if (doc.id == currentUserID) {
-        continue;
-      }
+      if (doc.id == currentUserID) continue;
 
-      // Fallback: if doc's email matches mine (in case doc was created incorrectly)
       final data = doc.data();
       final userEmail = data['email'] as String?;
       if (userEmail != null && userEmail == currentUserEmail) {
@@ -89,61 +84,107 @@ class _CrushHomePageState extends State<CrushHomePage> {
       }
 
       allUsers.add({
-        'id': doc.id, // This should be the other user's UID
+        'id': doc.id,
         'firstName': data['firstName'] ?? '',
         'lastName': data['lastName'] ?? '',
       });
     }
-
-    _users = allUsers;
+    setState(() {
+      _users = allUsers;
+    });
   }
 
-  /// Check if we have new "mutual crush" matches where the user hasn't been notified
-  Future<void> _checkForNewMatches() async {
+  // --------------------------------------------------------------------------
+  // NOTIFICATION (MUTUAL CRUSH) LOGIC
+  // --------------------------------------------------------------------------
+
+  /// 4) Check if we have new “mutual crush” notifications in notify_crushes
+  Future<void> _checkForNotifications() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
-    final userId = currentUser.uid;
+    final uid = currentUser.uid;
 
-    // Look for docs in user_matches:
-    // (userA == me && notifyA == true) or (userB == me && notifyB == true).
-    final matchesQuery = await FirebaseFirestore.instance
+    // A) where userA == me && notifyA == true
+    final notifyAQuery = await FirebaseFirestore.instance
         .collection('colleges')
         .doc(_collegeSlug)
-        .collection('user_matches')
-        .where('userA', isEqualTo: userId)
+        .collection('notify_crushes')
+        .where('userA', isEqualTo: uid)
         .where('notifyA', isEqualTo: true)
         .get();
 
-    for (final doc in matchesQuery.docs) {
+    for (final doc in notifyAQuery.docs) {
       final data = doc.data();
-      final userBName = data['userBName'] ?? 'Unknown';
-      // Show dialog
-      await _showMutualCrushDialog(userBName);
-      // Mark notifyA = false
+      final userBName = data['userBName']?.toString().toUpperCase() ?? 'UNKNOWN';
+      // show local pop-up
+      await _showNotifyDialog(userBName);
+      // set notifyA = false
       await doc.reference.update({'notifyA': false});
+      // If notifyB == false also, remove doc
+      await _maybeRemoveNotifyDoc(doc.reference);
     }
 
-    // Then check (userB == me && notifyB == true)
-    final matchesQuery2 = await FirebaseFirestore.instance
+    // B) where userB == me && notifyB == true
+    final notifyBQuery = await FirebaseFirestore.instance
         .collection('colleges')
         .doc(_collegeSlug)
-        .collection('user_matches')
-        .where('userB', isEqualTo: userId)
+        .collection('notify_crushes')
+        .where('userB', isEqualTo: uid)
         .where('notifyB', isEqualTo: true)
         .get();
 
-    for (final doc in matchesQuery2.docs) {
+    for (final doc in notifyBQuery.docs) {
       final data = doc.data();
-      final userAName = data['userAName'] ?? 'Unknown';
-      // Show dialog
-      await _showMutualCrushDialog(userAName);
-      // Mark notifyB = false
+      final userAName = data['userAName']?.toString().toUpperCase() ?? 'UNKNOWN';
+      // show local pop-up
+      await _showNotifyDialog(userAName);
+      // set notifyB = false
       await doc.reference.update({'notifyB': false});
+      // remove doc if notifyA == false and notifyB == false
+      await _maybeRemoveNotifyDoc(doc.reference);
     }
   }
 
-  /// Called when user clicks "Crush" on someone
+  /// 5) If both notifyA & notifyB are false, remove the doc
+  Future<void> _maybeRemoveNotifyDoc(DocumentReference docRef) async {
+    final snap = await docRef.get();
+    if (!snap.exists) return; // doc was removed or something else
+    final data = snap.data() as Map<String, dynamic>?;
+    if (data == null) return;
+
+    final notifyA = data['notifyA'] as bool? ?? false;
+    final notifyB = data['notifyB'] as bool? ?? false;
+    if (!notifyA && !notifyB) {
+      // both false, remove doc
+      await docRef.delete();
+    }
+  }
+
+  /// 6) Popup for a mutual crush from notify_crushes
+  Future<void> _showNotifyDialog(String partnerName) async {
+    return showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Mutual Crush!'),
+          content: Text('YOU AND $partnerName BOTH HAVE A CRUSH ON EACH OTHER!'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Awesome!'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // CRUSH LOGIC
+  // --------------------------------------------------------------------------
+
+  /// 7) Called when user clicks "Crush"
   Future<void> _crushOnUser(Map<String, dynamic> otherUser) async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
@@ -152,19 +193,17 @@ class _CrushHomePageState extends State<CrushHomePage> {
       );
       return;
     }
-
-    final fromUserID = currentUser.uid; // me
-    final toUserID = otherUser['id'] as String; // them
+    final fromUserID = currentUser.uid;
+    final toUserID = otherUser['id'] as String;
     final toUserName = '${otherUser['firstName']} ${otherUser['lastName']}';
 
     try {
-      // 1) Check if I already crush on someone else
-      final existingCrushDocSnap =
-          await _getExistingCrushDoc(_collegeSlug, fromUserID);
-      if (existingCrushDocSnap != null) {
-        final oldToUserID = existingCrushDocSnap['toUserID'] as String;
+      // A) check if I already crush on someone else
+      final existingCrush = await _getExistingCrushDoc(fromUserID);
+      if (existingCrush != null) {
+        final oldToUserID = existingCrush['toUserID'] as String;
         if (oldToUserID == toUserID) {
-          // Already crushing the same person
+          // Already crushing them
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('You already have a crush on $toUserName!')),
           );
@@ -177,25 +216,25 @@ class _CrushHomePageState extends State<CrushHomePage> {
             content:
                 'You already like $oldUserName.\nSwitch your crush to $toUserName?',
           );
-          if (!confirm) return; // user canceled
-          // Remove old crush doc
-          final docId = '${fromUserID}_$oldToUserID';
+          if (!confirm) return; // canceled
+          // remove old doc
+          final oldDocId = '${fromUserID}_$oldToUserID';
           await FirebaseFirestore.instance
               .collection('colleges')
               .doc(_collegeSlug)
               .collection('user_crushes')
-              .doc(docId)
+              .doc(oldDocId)
               .delete();
         }
       }
 
-      // 2) Now set my new crush doc
+      // B) Now set my new crush doc
       await _setMyCrushOnUser(fromUserID, toUserID);
 
-      // 3) Check if there's a doc for toUserID->fromUserID (mutual crush)
+      // C) check if user B already liked me
       final mutual = await _checkMutualCrush(toUserID, fromUserID);
       if (mutual) {
-        // If mutual, remove both docs from user_crushes and create a doc in user_matches
+        // remove both docs from user_crushes, create doc in notify_crushes
         await _handleMutualCrush(fromUserID, toUserID, toUserName);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -209,22 +248,20 @@ class _CrushHomePageState extends State<CrushHomePage> {
     }
   }
 
-  /// Query user_crushes for fromUserID == me in the same college
-  Future<Map<String, dynamic>?> _getExistingCrushDoc(
-      String slug, String fromUserID) async {
+  /// 8) Return doc if I have an existing crush
+  Future<Map<String, dynamic>?> _getExistingCrushDoc(String fromUserID) async {
     final query = await FirebaseFirestore.instance
         .collection('colleges')
-        .doc(slug)
+        .doc(_collegeSlug)
         .collection('user_crushes')
         .where('fromUserID', isEqualTo: fromUserID)
         .limit(1)
         .get();
-
     if (query.docs.isEmpty) return null;
     return query.docs.first.data();
   }
 
-  /// Return a user's name from their doc in Firestore
+  /// 9) Return the user’s name from Firestore
   Future<String> _getUserNameById(String userID) async {
     final userDoc = await FirebaseFirestore.instance
         .collection('colleges')
@@ -234,14 +271,14 @@ class _CrushHomePageState extends State<CrushHomePage> {
         .get();
     if (!userDoc.exists) return 'Unknown';
     final data = userDoc.data()!;
-    final f = data['firstName'] ?? '';
-    final l = data['lastName'] ?? '';
-    return '$f $l';
+    final firstName = data['firstName'] ?? '';
+    final lastName = data['lastName'] ?? '';
+    return '$firstName $lastName';
   }
 
-  /// Create doc fromUserID->toUserID in user_crushes
+  /// 10) Create doc in user_crushes
   Future<void> _setMyCrushOnUser(String fromUserID, String toUserID) async {
-    final docId = '${fromUserID}_$toUserID'; // UID-based
+    final docId = '${fromUserID}_$toUserID';
     await FirebaseFirestore.instance
         .collection('colleges')
         .doc(_collegeSlug)
@@ -254,23 +291,19 @@ class _CrushHomePageState extends State<CrushHomePage> {
     });
   }
 
-  /// Check if there's a doc for toUserID->fromUserID (meaning they liked me)
+  /// 11) Check if doc to->from exists
   Future<bool> _checkMutualCrush(String toUserID, String fromUserID) async {
     final docId = '${toUserID}_$fromUserID';
-    final docSnap = await FirebaseFirestore.instance
+    final snap = await FirebaseFirestore.instance
         .collection('colleges')
         .doc(_collegeSlug)
         .collection('user_crushes')
         .doc(docId)
         .get();
-    return docSnap.exists;
+    return snap.exists;
   }
 
-  /// If mutual crush:
-  /// 1) remove both docs (from->to and to->from)
-  /// 2) create a doc in user_matches
-  /// 3) show an alert for the local user
-  /// 4) the other user sees it next time they load or refresh
+  /// 12) If mutual: remove from->to, remove to->from, create doc in notify_crushes
   Future<void> _handleMutualCrush(
       String fromUserID, String toUserID, String toUserName) async {
     // remove from->to
@@ -291,51 +324,43 @@ class _CrushHomePageState extends State<CrushHomePage> {
         .doc(docId2)
         .delete();
 
-    // create user_matches doc
+    // create doc in notify_crushes
     final myName = await _getUserNameById(fromUserID);
-    final matchDocId =
-        '${fromUserID}_$toUserID'; // or any unique scheme you'd like
+    final notifyDocId = '${fromUserID}_$toUserID';
     await FirebaseFirestore.instance
         .collection('colleges')
         .doc(_collegeSlug)
-        .collection('user_matches')
-        .doc(matchDocId)
+        .collection('notify_crushes')
+        .doc(notifyDocId)
         .set({
       'userA': fromUserID,
-      'userAName': myName,
+      'userAName': myName.toUpperCase(), // store my name in CAPS or up to you
       'userB': toUserID,
-      'userBName': toUserName,
-      'matchedAt': Timestamp.now(),
-      'notifyA': true, // so A sees the message if they reload or come back
-      'notifyB': true, // so B sees it next time they log in or refresh
+      'userBName': toUserName.toUpperCase(), // store partner name in CAPS
+      'createdAt': Timestamp.now(),
+      'notifyA': true, // so I see it if I refresh
+      'notifyB': true, // so they see it next time
     });
 
-    // Show local user immediate popup
-    _showMutualCrushDialog(toUserName);
-  }
-
-  /// Show "YOU AND X BOTH HAVE A CRUSH ON EACH OTHER!"
-  Future<void> _showMutualCrushDialog(String partnerName) async {
+    // show me local popup
     showDialog(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Mutual Crush!'),
-          content: Text(
-            'YOU AND $partnerName BOTH HAVE A CRUSH ON EACH OTHER!',
+      builder: (ctx) => AlertDialog(
+        title: const Text('Mutual Crush!'),
+        content: Text(
+          'YOU AND ${toUserName.toUpperCase()} BOTH HAVE A CRUSH ON EACH OTHER!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Awesome!'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Awesome!'),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
   }
 
-  /// Generic confirm dialog
+  /// 13) Confirm dialog
   Future<bool> _showConfirmDialog({
     required String title,
     required String content,
@@ -362,6 +387,9 @@ class _CrushHomePageState extends State<CrushHomePage> {
         true;
   }
 
+  // --------------------------------------------------------------------------
+  // BUILD
+  // --------------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -408,7 +436,6 @@ class _CrushHomePageState extends State<CrushHomePage> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              // Display the name
                               Expanded(
                                 child: Text(
                                   fullName,
@@ -420,7 +447,6 @@ class _CrushHomePageState extends State<CrushHomePage> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              // Crush button
                               ElevatedButton(
                                 onPressed: () => _crushOnUser(user),
                                 style: ElevatedButton.styleFrom(
