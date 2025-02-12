@@ -35,7 +35,7 @@ class _CrushHomePageState extends State<CrushHomePage> {
     try {
       _collegeSlug = await _getCollegeSlug();
       await _fetchUsersInCollege();
-      await _checkForNewMatches(); // see if there's a "mutual crush" doc waiting for me
+      await _checkForNewMatches(); // see if there's a "mutual crush" doc waiting
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error initializing page: $e')),
@@ -65,6 +65,8 @@ class _CrushHomePageState extends State<CrushHomePage> {
     if (currentUser == null) {
       throw Exception('No user is logged in.');
     }
+    final currentUserID = currentUser.uid;
+    final currentUserEmail = currentUser.email;
 
     final querySnap = await FirebaseFirestore.instance
         .collection('colleges')
@@ -72,13 +74,22 @@ class _CrushHomePageState extends State<CrushHomePage> {
         .collection('users')
         .get();
 
-    final currentUserID = currentUser.uid;
     final allUsers = <Map<String, dynamic>>[];
     for (final doc in querySnap.docs) {
-      if (doc.id == currentUserID) continue;
+      // ALWAYS skip if doc's id matches my uid
+      if (doc.id == currentUserID) {
+        continue;
+      }
+
+      // Fallback: if doc's email matches mine (in case doc was created incorrectly)
       final data = doc.data();
+      final userEmail = data['email'] as String?;
+      if (userEmail != null && userEmail == currentUserEmail) {
+        continue;
+      }
+
       allUsers.add({
-        'id': doc.id,
+        'id': doc.id, // This should be the other user's UID
         'firstName': data['firstName'] ?? '',
         'lastName': data['lastName'] ?? '',
       });
@@ -94,22 +105,18 @@ class _CrushHomePageState extends State<CrushHomePage> {
 
     final userId = currentUser.uid;
 
-    // We look for docs in user_matches where (userA == me && notifyA==true) OR (userB == me && notifyB==true)
+    // Look for docs in user_matches:
+    // (userA == me && notifyA == true) or (userB == me && notifyB == true).
     final matchesQuery = await FirebaseFirestore.instance
         .collection('colleges')
         .doc(_collegeSlug)
         .collection('user_matches')
-        .where(
-          // We do a "whereIn" approach or do 2 separate queries. We'll do 2 queries for clarity
-          'userA',
-          isEqualTo: userId,
-        )
+        .where('userA', isEqualTo: userId)
         .where('notifyA', isEqualTo: true)
         .get();
 
     for (final doc in matchesQuery.docs) {
       final data = doc.data();
-      final userB = data['userB'] ?? 'Unknown';
       final userBName = data['userBName'] ?? 'Unknown';
       // Show dialog
       await _showMutualCrushDialog(userBName);
@@ -117,7 +124,7 @@ class _CrushHomePageState extends State<CrushHomePage> {
       await doc.reference.update({'notifyA': false});
     }
 
-    // Check the other scenario: (userB == me && notifyB==true)
+    // Then check (userB == me && notifyB == true)
     final matchesQuery2 = await FirebaseFirestore.instance
         .collection('colleges')
         .doc(_collegeSlug)
@@ -128,7 +135,6 @@ class _CrushHomePageState extends State<CrushHomePage> {
 
     for (final doc in matchesQuery2.docs) {
       final data = doc.data();
-      final userA = data['userA'] ?? 'Unknown';
       final userAName = data['userAName'] ?? 'Unknown';
       // Show dialog
       await _showMutualCrushDialog(userAName);
@@ -147,8 +153,8 @@ class _CrushHomePageState extends State<CrushHomePage> {
       return;
     }
 
-    final fromUserID = currentUser.uid;
-    final toUserID = otherUser['id'] as String;
+    final fromUserID = currentUser.uid; // me
+    final toUserID = otherUser['id'] as String; // them
     final toUserName = '${otherUser['firstName']} ${otherUser['lastName']}';
 
     try {
@@ -235,7 +241,7 @@ class _CrushHomePageState extends State<CrushHomePage> {
 
   /// Create doc fromUserID->toUserID in user_crushes
   Future<void> _setMyCrushOnUser(String fromUserID, String toUserID) async {
-    final docId = '${fromUserID}_$toUserID';
+    final docId = '${fromUserID}_$toUserID'; // UID-based
     await FirebaseFirestore.instance
         .collection('colleges')
         .doc(_collegeSlug)
