@@ -84,7 +84,7 @@ class _SignUpPageState extends State<SignUpPage> {
         password: password,
       );
 
-      // Send email verification
+      // Send email verification (optional in dev)
       await userCredential.user?.sendEmailVerification();
 
       setState(() {
