@@ -1,4 +1,5 @@
 import 'package:crushx/sign_up_page.dart';
+import 'package:crushx/crush_home_page.dart';
 import 'package:flutter/material.dart';
 // Firebase Auth
 import 'package:firebase_auth/firebase_auth.dart';
@@ -36,12 +37,12 @@ class _SignInPageState extends State<SignInPage> {
       );
       final user = userCredential.user;
 
-      // CHANGED: Force reload the user to ensure we have the latest verification status.
+      // Force reload the user to ensure we have the latest verification status.
       if (user != null) {
         await user.reload();
       }
-
-      // 1) Enforce email verification
+  /*
+      // Enforce email verification
       if (user != null && !user.emailVerified) {
         // Immediately sign them out
         await FirebaseAuth.instance.signOut();
@@ -52,14 +53,17 @@ class _SignInPageState extends State<SignInPage> {
         );
         return;
       }
-
-      // 2) Otherwise, the user is signed in with a verified email
+*/
+      // Otherwise, the user is signed in with a verified email
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sign-in successful!')),
       );
 
-      // Navigate to your home screen or wherever next
-      // Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomePage()));
+      // Navigate to CrushHomePage
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const CrushHomePage()),
+      );
 
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -77,19 +81,15 @@ class _SignInPageState extends State<SignInPage> {
     });
 
     try {
-      print('Google sign-in button clicked'); // CHANGED: Debug print
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
-
       if (googleUser == null) {
-        // User canceled sign-in or popup blocked
-        print('Google sign-in was canceled or blocked'); // CHANGED: Debug print
+        // User canceled sign-in
         setState(() {
           _isLoading = false;
         });
         return;
       }
 
-      print('Google user is $googleUser'); // CHANGED: Debug print
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
 
@@ -101,10 +101,10 @@ class _SignInPageState extends State<SignInPage> {
       final UserCredential userCredential =
           await FirebaseAuth.instance.signInWithCredential(credential);
 
-      // You might want to enforce only college-domain emails here:
       final String? email = userCredential.user?.email;
       if (email != null) {
         final domain = email.split('@').last;
+        // If you want to ensure the domain is a valid college domain:
         if (!['university.edu', 'college.edu', 'scu.edu'].contains(domain)) {
           await FirebaseAuth.instance.signOut();
           ScaffoldMessenger.of(context).showSnackBar(
@@ -118,7 +118,12 @@ class _SignInPageState extends State<SignInPage> {
         const SnackBar(content: Text('Google Sign-in successful!')),
       );
 
-      // Navigate to home screen, etc.
+      // Navigate to CrushHomePage
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const CrushHomePage()),
+      );
+
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Google Sign-in failed: ${e.message}')),
@@ -304,7 +309,8 @@ class _SignInPageState extends State<SignInPage> {
                     onPressed: () {
                       // Navigate to your Sign Up page
                       Navigator.push(context,
-                          MaterialPageRoute(builder: (_) => const SignUpPage()));
+                        MaterialPageRoute(builder: (_) => const SignUpPage())
+                      );
                     },
                     child: const Text(
                       'Don\'t have an account? Sign up here',
